@@ -12,46 +12,67 @@ const RPC_NODES = [
   "207.244.255.1:6000"
 ];
 
-const ACTIVE_THRESHOLD = 600; // 10 minutes
+// Mark active only if seen within last 30 minutes
+const ACTIVE_THRESHOLD = 1800;
 
 export async function fetchAllPnodes() {
   const podMap = new Map();
   const now = Math.floor(Date.now() / 1000);
 
-  await Promise.all(
+  await Promise.allSettled(
     RPC_NODES.map(async (node) => {
       try {
         const res = await axios.post(
           `http://${node}/rpc`,
-          { jsonrpc: "2.0", id: 1, method: "get-pods-with-stats", params: [] },
-          { timeout: 5000 } // serverless-friendly timeout
+          {
+            jsonrpc: "2.0",
+            id: 1,
+            method: "get-pods-with-stats",
+            params: []
+          },
+          { timeout: 5000 }
         );
 
-        const pods = res.data?.result?.pods || [];
-        if (!pods.length) return;
+        const pods = res.data?.result?.pods;
+        if (!Array.isArray(pods)) return;
 
         pods.forEach((pod) => {
-          if (!pod.pubkey) return;
+          if (!pod?.pubkey) return;
 
-          const lastSeenSec = pod.last_seen_timestamp > 1e12
-            ? pod.last_seen_timestamp / 1000
-            : pod.last_seen_timestamp;
+          const lastSeen =
+            pod.last_seen_timestamp > 1e12
+              ? Math.floor(pod.last_seen_timestamp / 1000)
+              : pod.last_seen_timestamp;
 
-          const isActive = now - lastSeenSec < ACTIVE_THRESHOLD;
+          const isActive =
+            typeof lastSeen === "number"
+              ? now - lastSeen < ACTIVE_THRESHOLD
+              : false;
 
           if (!podMap.has(pod.pubkey)) {
-            podMap.set(pod.pubkey, { ...pod, isActive });
+            // First time seeing this pod
+            podMap.set(pod.pubkey, {
+              ...pod,
+              isActive
+            });
           } else {
+            // Merge: if ANY RPC sees it active, mark active
             const existing = podMap.get(pod.pubkey);
-            podMap.set(pod.pubkey, { ...existing, isActive: existing.isActive || isActive });
+            podMap.set(pod.pubkey, {
+              ...existing,
+              isActive: existing.isActive || isActive
+            });
           }
         });
-
       } catch (err) {
-        console.warn(`Failed RPC: ${node} - ${err.message}`);
+        // Silent fail — dashboards NEVER fail hard on bad RPCs
+        console.warn(`RPC ${node} failed`);
       }
     })
   );
 
-  return Array.from(podMap.values());
+  const result = Array.from(podMap.values());
+
+  console.log(`[pNodes] Total unique pods: ${result.length}`);
+  return result;
 }
