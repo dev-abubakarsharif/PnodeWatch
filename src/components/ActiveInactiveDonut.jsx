@@ -12,7 +12,7 @@ const ActiveInactiveDonut = ({ nodes = [] }) => {
   const inactive = pods.length - active;
 
   return (
-    <div className="w-80 bg-gray-800 rounded-xl p-4">
+    <div className="w-full max-w-sm mx-auto bg-gray-800 rounded-xl p-4">
       {/* Chart Container */}
       <div className="relative h-64 w-full">
         <Doughnut
